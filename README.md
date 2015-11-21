@@ -2,9 +2,10 @@
 A PHP script that reads RethinkDB files and visualizes their layout. Can be used to identify fragmentation in RethinkDB data files.
 
 ## Limitations
-There are three important limitations at the moment:
+There are a few important limitations at the moment:
 * The code needs refactoring. It's currently a single gigantic file.
 * There is almost no error checking.
+* The script becomes very slow and uses a lot of memory when applied to large data files.
 * Handling of files larger than 4 GB might or might not work, depending on your version of PHP and your platform.
 
 ## Output
