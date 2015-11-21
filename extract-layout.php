@@ -275,7 +275,6 @@ function offsetToExtent($offset)
     return ($offset - ($offset % $EXTENT_SIZE)) / $EXTENT_SIZE;
 }
 
-// This is a limited subset of the information in the LBA for now (offsets only).
 class LbaList
 {
     public $normalEntries;
