@@ -12,6 +12,7 @@ if ($file === false)
 }
 
 $extentMap = array();
+$extentUtilization = array();
 
 function readUInt64($file)
 {
@@ -75,11 +76,13 @@ class FlaggedOffset
 function readFlaggedOffset($file)
 {
     $res = new FlaggedOffset();
-    // This is not quite correct. We want to read only the first bit, but `unpack` doesn't support that.
-    // TODO: Use more than 32 bits
     $v = unpack("L", fread($file, 4));
     $res->offset = $v[1];
-    fread($file, 3);
+    $v = unpack("C3", fread($file, 3));
+    $res->offset += (int)($v[1] << 32);
+    $res->offset += (int)($v[2] << 40);
+    $res->offset += (int)($v[3] << 48);
+    // This is not quite correct. We want to read only the first bit, but `unpack` doesn't support that.
     $v = unpack("C", fread($file, 1));
     $res->isNull = $v[1] > 0;
     return $res;
@@ -275,8 +278,8 @@ function offsetToExtent($offset)
 // This is a limited subset of the information in the LBA for now (offsets only).
 class LbaList
 {
-    public $normalOffsets;
-    public $auxOffsets;
+    public $normalEntries;
+    public $auxEntries;
 };
 
 function applyLbaEntry($lbaEntry, &$lbaList)
@@ -286,11 +289,11 @@ function applyLbaEntry($lbaEntry, &$lbaList)
         if ($lbaEntry->offset->isNull)
         {
             // Deletion
-            unset($lbaList->auxOffsets[$lbaEntry->blockId->id]);
+            unset($lbaList->auxEntries[$lbaEntry->blockId->id]);
         }
         else
         {
-            $lbaList->auxOffsets[$lbaEntry->blockId->id] = $lbaEntry->offset->offset;
+            $lbaList->auxEntries[$lbaEntry->blockId->id] = $lbaEntry;
         }
     }
     else
@@ -298,11 +301,11 @@ function applyLbaEntry($lbaEntry, &$lbaList)
         if ($lbaEntry->offset->isNull)
         {
             // Deletion
-            unset($lbaList->normalOffsets[$lbaEntry->blockId->id]);
+            unset($lbaList->normalEntries[$lbaEntry->blockId->id]);
         }
         else
         {
-            $lbaList->normalOffsets[$lbaEntry->blockId->id] = $lbaEntry->offset->offset;
+            $lbaList->normalEntries[$lbaEntry->blockId->id] = $lbaEntry;
         }
     }
 }
@@ -310,6 +313,7 @@ function applyLbaEntry($lbaEntry, &$lbaList)
 function loadLbaList($file, $metablock)
 {
     global $extentMap;
+    global $extentUtilization;
 
     $res = new LbaList();
     $res->normalOffsets = array();
@@ -327,6 +331,7 @@ function loadLbaList($file, $metablock)
         {
             $superblockOffset = $lbaShard->lbaSuperblockOffset->offset;
             $extentMap[offsetToExtent($superblockOffset)] = "LBA SB";
+            $extentUtilization[offsetToExtent($superblockOffset)] = 1;
 
             fseek($file, $superblockOffset);
             $lbaSuperblock = readLbaSuperblock($file, $lbaShard->lbaSuperblockEntriesCount);
@@ -334,6 +339,8 @@ function loadLbaList($file, $metablock)
             foreach ($lbaSuperblock->entries as $lbaExtent)
             {
                 $extentMap[offsetToExtent($lbaExtent->offset->offset)] = "LBA";
+                // TODO: Compute proper utilization for LBA extents
+                $extentUtilization[offsetToExtent($lbaExtent->offset->offset)] = 1;
                 fseek($file, $lbaExtent->offset->offset);
                 $lbaExtents[] = readLbaExtent($file, $lbaExtent->entriesCount);
             }
@@ -342,6 +349,8 @@ function loadLbaList($file, $metablock)
         if (!$lbaShard->lastLbaExtentOffset->isNull)
         {
             $extentMap[offsetToExtent($lbaShard->lastLbaExtentOffset->offset)] = "LBA";
+            // TODO: Compute proper utilization for LBA extents
+            $extentUtilization[offsetToExtent($lbaShard->lastLbaExtentOffset->offset)] = 1;
             fseek($file, $lbaShard->lastLbaExtentOffset->offset);
             $lbaExtents[] = readLbaExtent($file, $lbaShard->lastLbaExtentEntriesCount);
         }
@@ -365,6 +374,7 @@ function loadLbaList($file, $metablock)
 
 echo "Reading metablock... ";
 $extentMap[0] = "metablock";
+$extentUtilization[0] = 1;
 $metablock = findLatestMetablock($file);
 echo "done\n";
 //var_dump($metablock);
@@ -372,19 +382,32 @@ echo "done\n";
 echo "Loading LBA... ";
 $lbaList = loadLbaList($file, $metablock->metablock);
 echo "done\n";
-echo "Found " . count($lbaList->normalOffsets) . " normal and " . count ($lbaList->auxOffsets) . " aux blocks\n";
+echo "Found " . count($lbaList->normalEntries) . " normal and " . count ($lbaList->auxEntries) . " aux blocks\n";
 
-// TODO: Add additional granularity and indicate how full an extent is
-foreach ($lbaList->normalOffsets as $offset)
+// TODO: Distinguish between aux and normal blocks in utilization?
+$EXTENT_SIZE = 2 * 1024 * 1024;
+foreach ($lbaList->normalEntries as $entry)
 {
-    $extentMap[offsetToExtent($offset)] = "data";
+    $ext = offsetToExtent($entry->offset->offset);
+    $extentMap[$ext] = "data";
+    if (!isset($extentUtilization[$ext]))
+    {
+        $extentUtilization[$ext] = 0;
+    }
+    $extentUtilization[$ext] += $entry->serBlockSize / $EXTENT_SIZE;
 }
-foreach ($lbaList->auxOffsets as $offset)
+foreach ($lbaList->auxEntries as $entry)
 {
-    $extentMap[offsetToExtent($offset)] = "data";
+    $ext = offsetToExtent($entry->offset->offset);
+    $extentMap[$ext] = "data";
+    if (!isset($extentUtilization[$ext]))
+    {
+        $extentUtilization[$ext] = 0;
+    }
+    $extentUtilization[$ext] += $entry->serBlockSize / $EXTENT_SIZE;
 }
 
-function visualizeExtentMap($map, $filename)
+function visualizeExtentMap($map, $utilization, $filename)
 {
     $maxId = 0;
     foreach ($map as $id => $e)
@@ -401,10 +424,12 @@ function visualizeExtentMap($map, $filename)
     $im = imagecreatetruecolor(($maxId + 1) * $scale, $height);
     $bgColor = imagecolorallocate($im, 255, 255, 255);
     $dataColor = imagecolorallocate($im, 128, 255, 128);
+    $dataColor = imagecolorallocate($im, 128, 255, 128);
     $lbaColor = imagecolorallocate($im, 128, 128, 255);
     $lbaSbColor = imagecolorallocate($im, 0, 0, 128);
     $metablockColor = imagecolorallocate($im, 128, 128, 128);
     $unknownColor = imagecolorallocate($im, 255, 0, 0);
+    $untilizedOverlayColor = imagecolorallocatealpha($im, 255, 255, 255, 48);
 
     imagefill($im, 0, 0, $bgColor);
     
@@ -432,6 +457,7 @@ function visualizeExtentMap($map, $filename)
         }
 
         imagefilledrectangle($im, $id * $scale, 0, ($id + 1) * $scale, $height - 1, $c);
+        imagefilledrectangle($im, $id * $scale, 0, ($id + 1) * $scale, ($height - 1) * (1 - $utilization[$id]), $untilizedOverlayColor);
     }
 
     imagepng($im, $filename);
@@ -440,7 +466,7 @@ function visualizeExtentMap($map, $filename)
 
 $out = basename($argv[1]) . ".png";
 echo "Writing map to $out... ";
-visualizeExtentMap($extentMap, $out);
+visualizeExtentMap($extentMap, $extentUtilization, $out);
 echo "done\n";
 
 fclose($file);
