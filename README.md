@@ -1,6 +1,8 @@
 # rdb-layout
 A PHP script that reads RethinkDB files and visualizes their layout. Can be used to identify fragmentation in RethinkDB data files.
 
+Requires PHP 5.3 or higher and [GD](http://php.net/manual/en/book.image.php).
+
 ## Limitations
 There are a few important limitations at the moment:
 * The code needs refactoring. It's currently a single gigantic file.
