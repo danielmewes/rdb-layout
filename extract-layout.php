@@ -316,8 +316,8 @@ function loadLbaList($file, $metablock)
     global $extentUtilization;
 
     $res = new LbaList();
-    $res->normalOffsets = array();
-    $res->auxOffsets = array();
+    $res->normalEntries = array();
+    $res->auxEntries = array();
 
     // We read lba entries in the following order:
     // 1. From LBA extents listed in the lba superblock
@@ -457,7 +457,10 @@ function visualizeExtentMap($map, $utilization, $filename)
         }
 
         imagefilledrectangle($im, $id * $scale, 0, ($id + 1) * $scale, $height - 1, $c);
-        imagefilledrectangle($im, $id * $scale, 0, ($id + 1) * $scale, ($height - 1) * (1 - $utilization[$id]), $untilizedOverlayColor);
+        if ($utilization[$id] < 1)
+        {
+            imagefilledrectangle($im, $id * $scale, 0, ($id + 1) * $scale, ($height - 1) * (1 - $utilization[$id]), $untilizedOverlayColor);
+        }
     }
 
     imagepng($im, $filename);
