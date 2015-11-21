@@ -10,5 +10,5 @@ There are three important limitations at the moment:
 ## Output
 <img src="/example.png">
 
-The output of the script is a PNG file that corresponds to the file layout. The metablock extent is grey, data extents are green, and LBA extents are blue. White is unused space in the file.
+The output of the script is a PNG file that visualizes the file layout. The metablock extent is grey, data extents are green, and LBA extents are blue. White is unused space in the file.
 For data extents (green), the script also visualizes the space utilization within the extents (total size of active blocks in the extent vs. garbage and unused space).
